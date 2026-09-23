@@ -3,7 +3,7 @@ package eventbus
 
 type Topic string
 
-type MetaData struct {
+type Metadata struct {
     TraceID string
     RequestID string
     Source string
@@ -11,7 +11,7 @@ type MetaData struct {
 
 type Event struct {
     Type string
-    Topics []Topic
-    MetaData *MetaData
-    PayLoad []byte
+    Topic Topic
+    Metadata *Metadata
+    Payload any
 }

@@ -5,34 +5,42 @@ import (
 	"sync/atomic"
 )
 
-type SubscriptionID uint64
+type SubscriptionID string 
 
 // Handler 全局adaptor统一适配器
 type Handler func(
     ctx context.Context,
     event *Event,
-) error
+) *Result
 
-/* 
-SubscriptionFlag 标识事件处理类型
-    1. 立即执行;
-    2. 只能执行一次;
-    3. async 异步支持并发;
-    4. async 异步不支持并发.
-*/
+type ExecMode uint8
+
+const (
+    ExecSync ExecMode = iota // 同步执行
+    ExecAsyncConcur // 异步, 支持并发
+    ExecAsyncSerial // 异步，串行
+)
+
 type SubscriptionFlag uint8
 
 const (
-    FlagNone SubscriptionFlag = 0
-    FlagOnce SubscriptionFlag = 1 << iota
-    FlagAsyncConcur 
-    FlagAsyncSerial
+    FlagOnce SubscriptionFlag = 1 // 限制只能执行一次
 )
 
 type Subscription struct {
     id SubscriptionID
     handler Handler
-    flags SubscriptionFlag
+    flag SubscriptionFlag
+    mode ExecMode
 
-    called atomic.Bool
+    called atomic.Bool // once执行时使用
+}
+
+// isOnce 是否限制只能执行一次
+func (s *Subscription) isOnce() bool {
+    return s.flag & FlagOnce != 0
+}
+
+func (s *Subscription) getID() SubscriptionID {
+    return s.id
 }

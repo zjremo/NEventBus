@@ -1,12 +1,10 @@
 package eventbus
 
 import (
-	"fmt"
 	"log"
 	"testing"
 
 	"github.com/bwmarrin/snowflake"
-	"github.com/json-iterator/go"
 )
 
 type User struct {
@@ -21,31 +19,29 @@ func TestEvent(t *testing.T) {
     if err != nil {
         log.Fatalf("snowflake produce Node error: %v\n", err)
     }
-    metadata := &MetaData{
-        TraceID: node.Generate().Base32(),
-        RequestID: node.Generate().Base32(),
+    metadata := &Metadata{
+        TraceID: node.Generate().Base64(),
+        RequestID: node.Generate().Base64(),
         Source: "jrz",
     }
 
-    // 2. build PayLoad
+    // 2. build Payload
     user := &User{
         Name: "jrz",
         Age: 22,
         Address: "Beijing",
     }
-
-    data, err := jsoniter.Marshal(user)
-    if err != nil {
-        log.Fatalf("jsoniter Marshal failed, err: %v\n", err)
-    }
+    
+    log.Printf("user: %#v\n", user)
 
     // 3. build event
     event := &Event {
         Type: "user:create",
-        Topics: []Topic{"1", "2", "3"},
-        MetaData: metadata,
-        PayLoad: data,
+        Topic: "1",
+        Metadata: metadata,
+        Payload: user,
     }
 
-    fmt.Println(event)
+    log.Printf("event: %#v\n", event)
+    log.Printf("Payload: %#v\n", event.Payload)
 }
