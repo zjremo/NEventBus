@@ -35,6 +35,10 @@ func (b *EventBus) RemoveTopic(topic Topic) {
     b.registry.removeTopic(topic)
 }
 
+func(b *EventBus) ListAllTopics() map[Topic]*TopicConfig {
+    return b.registry.ListAllTopics()
+}
+
 func (b *EventBus) Subscribe(
 	topic Topic,
 	handler Handler,

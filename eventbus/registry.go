@@ -72,6 +72,20 @@ func (r *Registry) getTopicConfig(topic Topic) *TopicConfig {
     return r.topicMap[topic]
 }
 
+func (r *Registry) ListAllTopics() map[Topic]*TopicConfig {
+    topicMapMutex.RLock()
+    defer topicMapMutex.RUnlock()
+
+    copyMap := make(map[Topic]*TopicConfig, len(r.topicMap)) 
+    for topic, config := range r.topicMap {
+        nconfig := &TopicConfig{
+            Mode: config.Mode,
+        }
+        copyMap[topic] = nconfig
+    }
+    return copyMap
+}
+
 /*
 Lookup 获取topic下的所有订阅触发器
 惰删topics中的subId与topic，如果此次没有完成，就交给下次完成。不以牺牲性能为代价来完成删除
