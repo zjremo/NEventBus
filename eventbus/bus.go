@@ -12,7 +12,6 @@ import (
 
 type EventBus struct {
 	registry *Registry
-
 	snowflakeNode *snowflake.Node // 雪花算法负责生成唯一的SubscriptionID
 }
 
@@ -28,11 +27,19 @@ func NewEventBus() *EventBus {
 	}
 }
 
+func (b *EventBus) CreateTopic(topic Topic, concurMode ConcurrencyMode) {
+    b.registry.createTopic(topic, concurMode)
+}
+
+func (b *EventBus) RemoveTopic(topic Topic) {
+    b.registry.removeTopic(topic)
+}
+
 func (b *EventBus) Subscribe(
 	topic Topic,
 	handler Handler,
 	isOnce bool,
-	execMode ExecMode,
+	concurMode ConcurrencyMode,
 	waitTime time.Duration,
 ) (sub *Subscription, err error) {
 	if len(topic) == 0 {
@@ -47,52 +54,56 @@ func (b *EventBus) Subscribe(
 	sub = &Subscription{
 		id:      SubscriptionID(id),
 		handler: handler,
-		mode:    execMode,
+		mode:    concurMode,
 	}
 
 	if isOnce {
 		sub.flag |= FlagOnce
 	}
 
-    if err = b.registry.AddSubscription(topic, sub, waitTime); err != nil {
-        return nil, err
-    }
-    return sub, nil
+	if err = b.registry.AddSubscription(topic, sub, waitTime); err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
 
 func (b *EventBus) Publish(
-    ctx context.Context,
-    event *Event,
+	ctx context.Context,
+	event *Event,
 ) (results map[SubscriptionID]*Result, err error) {
 
-    if event == nil {
-        return nil, ErrNilEvent
-    }
+	if event == nil {
+		return nil, ErrNilEvent
+	}
 
-    subs := b.registry.Lookup(event.Topic)
-    results = make(map[SubscriptionID]*Result, len(subs))
-    errIDs := make([]SubscriptionID, 0, len(subs))
+	subs := b.registry.Lookup(event.Topic)
+	if len(subs) == 0 {
+		return nil, nil
+	}
 
-    for _, sub := range subs {
-        if sub.isOnce() {
-            if !sub.called.CompareAndSwap(false, true) { // 已经执行过了
-                continue
-            }
-        }
+	results = make(map[SubscriptionID]*Result, len(subs))
+	errIDs := make([]SubscriptionID, 0, len(subs))
 
-        result := sub.handler(ctx, event)
-        if result == nil || result.Err != nil {
-            errIDs = append(errIDs, sub.getID())
-        }
-        results[sub.id] = result
-    }
+	for _, sub := range subs {
+		if sub.isOnce() {
+			if !sub.called.CompareAndSwap(false, true) { // 已经执行过了
+				continue
+			}
+		}
 
-    if len(errIDs) != 0 {
-        var bs strings.Builder
-        bs.WriteString("以下subscriptionID的subscription执行错误:\n")
-        fmt.Fprint(&bs, errIDs)
-        err = errors.Wrap(ErrSubExecutionFailed, bs.String())
-    }
+		result := sub.handler(ctx, event)
+		if result == nil || result.Err != nil {
+			errIDs = append(errIDs, sub.getID())
+		}
+		results[sub.id] = result
+	}
 
-    return results, err
+	if len(errIDs) != 0 {
+		var bs strings.Builder
+		bs.WriteString("以下subscriptionID的subscription执行错误:\n")
+		fmt.Fprint(&bs, errIDs)
+		err = errors.Wrap(ErrSubExecutionFailed, bs.String())
+	}
+
+	return results, err
 }

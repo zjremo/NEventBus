@@ -10,13 +10,13 @@ func NewResult() *Result {
 }
 
 func NewResultOK(data any) *Result {
-    return &Result{
-        Data: data,
-    }
+	return &Result{
+		Data: data,
+	}
 }
 
 func NewResultErr(err error) *Result {
-    return &Result {
-        Err: err,
-    }
+	return &Result{
+		Err: err,
+	}
 }

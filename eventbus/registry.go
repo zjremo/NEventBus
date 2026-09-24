@@ -2,19 +2,15 @@ package eventbus
 
 import (
 	"maps"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
 )
 
-func copySubMap(subMap map[SubscriptionID]struct{}) map[SubscriptionID]struct{} {
-	newSubMap := make(map[SubscriptionID]struct{}, len(subMap))
-	for subID := range subMap {
-		newSubMap[subID] = struct{}{}
-	}
-	return newSubMap
-}
+// topicMapMutex 创建topic的频率很低，基本不存在并发问题，直接利用读写锁即可
+var topicMapMutex sync.RWMutex
 
 // subscriptionTable 注册表
 type subscriptionTable struct {
@@ -25,69 +21,115 @@ type subscriptionTable struct {
 // Registry 持有注册表的引用
 type Registry struct {
 	table atomic.Pointer[subscriptionTable]
+    topicMap map[Topic]*TopicConfig
 }
 
 // NewRegistry 获取一个新的注册仓库
 func NewRegistry() *Registry {
 	table := &subscriptionTable{
 		topics: make(map[Topic]map[SubscriptionID]struct{}),
-        subIds: make(map[SubscriptionID]*Subscription),
+		subIds: make(map[SubscriptionID]*Subscription),
 	}
 
-	registry := &Registry{}
+    registry := &Registry{
+        topicMap: make(map[Topic]*TopicConfig),
+    }
 	registry.table.Store(table)
 
 	return registry
 }
 
+// createTopic 创建Topic
+func (r *Registry) createTopic(topic Topic, concurMode ConcurrencyMode) {
+    topicMapMutex.Lock()
+    defer topicMapMutex.Unlock()
+
+    r.topicMap[topic] = &TopicConfig{
+        Mode: concurMode,
+    }
+}
+
+// removeTopic 只删除topicMap的topic键，topics中的惰性删除
+func (r *Registry) removeTopic(topic Topic) {
+    topicMapMutex.Lock()
+    defer topicMapMutex.Unlock()
+
+    delete(r.topicMap, topic)
+}
+
+func (r *Registry) hasTopic(topic Topic) bool {
+    topicMapMutex.RLock()
+    defer topicMapMutex.RUnlock()
+
+    _, ok := r.topicMap[topic]
+    return ok
+}
+
+func (r *Registry) getTopicConfig(topic Topic) *TopicConfig {
+    topicMapMutex.RLock()
+    defer topicMapMutex.RUnlock()
+
+    return r.topicMap[topic]
+}
+
 /*
 Lookup 获取topic下的所有订阅触发器
-惰删topics中的subId，如果此次没有完成，就交给下次完成。不以牺牲性能为代价来完成删除
+惰删topics中的subId与topic，如果此次没有完成，就交给下次完成。不以牺牲性能为代价来完成删除
 */
 func (r *Registry) Lookup(topic Topic) (subscriptions []*Subscription) {
-    for range defaultLazyRemoveSubRetry {
-        oldTable := r.table.Load()
-        
-        submap, ok := oldTable.topics[topic]
-        if !ok {
-            return nil
-        }
+	for range defaultLazyRemoveSubRetry {
+		oldTable := r.table.Load()
 
-        subscriptions = make([]*Subscription, 0, len(submap))
-        newSubmap := make(map[SubscriptionID]struct{}, len(submap))
+		submap, ok := oldTable.topics[topic]
+		if !ok {
+			return nil
+		}
 
-        stale := false
-        for subID := range submap {
-            sub, ok := oldTable.subIds[subID]
-            if !ok {
-                stale = true
-                continue
+        // 查询TopicMap来获取是否真实存在topic
+        hasTopic := r.hasTopic(topic)
+        var newSubmap map[SubscriptionID]struct{}
+
+        if hasTopic {
+            subscriptions = make([]*Subscription, 0, len(submap))
+            newSubmap = make(map[SubscriptionID]struct{}, len(submap))
+
+            stale := false
+            for subID := range submap {
+                sub, ok := oldTable.subIds[subID]
+                if !ok {
+                    stale = true
+                    continue
+                }
+
+                subscriptions = append(subscriptions, sub)
+                newSubmap[subID] = struct{}{}
             }
 
-            subscriptions = append(subscriptions, sub)
-            newSubmap[subID] = struct{}{} 
+            if !stale { // 没有要lazy delete的
+                return
+            }
         }
 
-        if !stale { // 没有要lazy delete的
-            return 
+		// 此时执行lazy delete操作
+		newTopics := make(map[Topic]map[SubscriptionID]struct{}, len(oldTable.topics))
+		maps.Copy(newTopics, oldTable.topics)
+
+        if hasTopic {
+		    newTopics[topic] = newSubmap
+        } else {
+            delete(newTopics, topic)
         }
 
-        // 此时执行lazy delete操作
-        newTopics := make(map[Topic]map[SubscriptionID]struct{}, len(oldTable.topics))
-        maps.Copy(newTopics, oldTable.topics)
+		newTable := &subscriptionTable{
+			topics: newTopics,
+			subIds: oldTable.subIds,
+		}
 
-        newTopics[topic] = newSubmap
-
-        newTable := &subscriptionTable{
-            topics: newTopics,
-            subIds: oldTable.subIds,
-        }
-
-        if r.table.CompareAndSwap(oldTable, newTable) {
-            return 
-        }
-    }
-    return
+		if r.table.CompareAndSwap(oldTable, newTable) {
+			return
+		}
+	}
+	return
 }
 
 /* Cow机制，克隆table写入，然后替换引用 */
@@ -137,11 +179,10 @@ func (r *Registry) AddSubscription(topic Topic, sub *Subscription, waitTime time
 			newTable := r.cloneTableWithTopic(oldTable, topic)
 			// copy-on-write, begin modify operation
 			// 1. modify topics
-			_, ok := newTable.topics[topic]
-			if !ok {
-				newTable.topics[topic] = make(map[SubscriptionID]struct{})
+			subMap, ok := newTable.topics[topic]
+			if !ok || !r.hasTopic(topic) {
+                return ErrTopicNotFound 
 			}
-			subMap := newTable.topics[topic]
 			subMap[sub.id] = struct{}{}
 
 			// 2. modify subIds
@@ -192,4 +233,12 @@ func (r *Registry) RemoveSubscription(subID SubscriptionID, waitTime time.Durati
 	}
 
 	return errors.Wrapf(ErrExceedMaxRetry, "Remove subscription, subscriptionID: %s", subID)
+}
+
+func copySubMap(subMap map[SubscriptionID]struct{}) map[SubscriptionID]struct{} {
+	newSubMap := make(map[SubscriptionID]struct{}, len(subMap))
+	for subID := range subMap {
+		newSubMap[subID] = struct{}{}
+	}
+	return newSubMap
 }
