@@ -11,12 +11,18 @@ const (
 	defaultLazyRemoveSubRetry        = 5 // 惰性删除每次lookup尝试次数
 )
 
-// ConcurrencyMode 并发控制常量
-type ConcurrencyMode uint8
-
+// TopicConcurrencyMode Topic内部所有subscription的执行模式
+type TopicConcurrencyMode uint8
 const (
-	ConcurSync ConcurrencyMode = 0
-	ConcurAsync ConcurrencyMode = 1 << iota
+	TopicSerial TopicConcurrencyMode = iota
+	TopicParallel 
+)
+
+// SubConcurrencyMode 不同Publish之间对于Subscription的执行模式
+type SubConcurrencyMode uint8
+const (
+    SubSerial SubConcurrencyMode = iota
+    SubParallel
 )
 
 // SubscriptionFlag 回调触发标志位

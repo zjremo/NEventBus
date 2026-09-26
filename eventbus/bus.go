@@ -27,8 +27,8 @@ func NewEventBus() *EventBus {
 	}
 }
 
-func (b *EventBus) CreateTopic(topic Topic, concurMode ConcurrencyMode) {
-    b.registry.createTopic(topic, concurMode)
+func (b *EventBus) CreateTopic(topic Topic, topicConcurMode TopicConcurrencyMode) {
+    b.registry.createTopic(topic, topicConcurMode)
 }
 
 func (b *EventBus) RemoveTopic(topic Topic) {
@@ -43,7 +43,7 @@ func (b *EventBus) Subscribe(
 	topic Topic,
 	handler Handler,
 	isOnce bool,
-	concurMode ConcurrencyMode,
+	subConcurMode SubConcurrencyMode,
 	waitTime time.Duration,
 ) (sub *Subscription, err error) {
 	if len(topic) == 0 {
@@ -58,7 +58,7 @@ func (b *EventBus) Subscribe(
 	sub = &Subscription{
 		id:      SubscriptionID(id),
 		handler: handler,
-		mode:    concurMode,
+		mode:    subConcurMode,
 	}
 
 	if isOnce {
@@ -88,6 +88,7 @@ func (b *EventBus) Publish(
 	results = make(map[SubscriptionID]*Result, len(subs))
 	errIDs := make([]SubscriptionID, 0, len(subs))
 
+    // executor -> handle 
 	for _, sub := range subs {
 		if sub.isOnce() {
 			if !sub.called.CompareAndSwap(false, true) { // 已经执行过了

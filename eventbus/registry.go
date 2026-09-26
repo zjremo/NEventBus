@@ -40,12 +40,12 @@ func NewRegistry() *Registry {
 }
 
 // createTopic 创建Topic
-func (r *Registry) createTopic(topic Topic, concurMode ConcurrencyMode) {
+func (r *Registry) createTopic(topic Topic, topicConcurMode TopicConcurrencyMode) {
     topicMapMutex.Lock()
     defer topicMapMutex.Unlock()
 
     r.topicMap[topic] = &TopicConfig{
-        Mode: concurMode,
+        Mode: topicConcurMode,
     }
 }
 

@@ -4,7 +4,7 @@ package eventbus
 type Topic string
 
 type TopicConfig struct {
-    Mode ConcurrencyMode
+    Mode TopicConcurrencyMode
 }
 
 type Metadata struct {

@@ -18,7 +18,7 @@ type Subscription struct {
 	id      SubscriptionID
 	handler Handler
 	flag    SubscriptionFlag
-	mode    ConcurrencyMode
+	mode    SubConcurrencyMode
 
 	called atomic.Bool // once执行时使用
 }
@@ -28,8 +28,8 @@ func (s *Subscription) isOnce() bool {
 	return s.flag&FlagOnce != 0
 }
 
-func (s *Subscription) isAsync() bool {
-    return s.mode&ConcurAsync != 0
+func (s *Subscription) isParallel() bool {
+    return s.mode&SubParallel != 0
 }
 
 func (s *Subscription) getID() SubscriptionID {
