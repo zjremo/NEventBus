@@ -3,14 +3,14 @@ package eventbus
 
 type Topic string
 
-type TopicConfig struct {
-    Mode TopicConcurrencyMode
-}
-
 type Metadata struct {
 	TraceID   string
 	RequestID string
 	Source    string
+}
+
+type EventOptions struct {
+    SubmitFailuePolicy SubmitFailurePolicy
 }
 
 type Event struct {

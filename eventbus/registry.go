@@ -21,7 +21,7 @@ type subscriptionTable struct {
 // Registry 持有注册表的引用
 type Registry struct {
 	table atomic.Pointer[subscriptionTable]
-    topicMap map[Topic]*TopicConfig
+    topicMap map[Topic]struct{}
 }
 
 // NewRegistry 获取一个新的注册仓库
@@ -32,7 +32,7 @@ func NewRegistry() *Registry {
 	}
 
     registry := &Registry{
-        topicMap: make(map[Topic]*TopicConfig),
+        topicMap: make(map[Topic]struct{}),
     }
 	registry.table.Store(table)
 
@@ -40,13 +40,11 @@ func NewRegistry() *Registry {
 }
 
 // createTopic 创建Topic
-func (r *Registry) createTopic(topic Topic, topicConcurMode TopicConcurrencyMode) {
+func (r *Registry) createTopic(topic Topic) {
     topicMapMutex.Lock()
     defer topicMapMutex.Unlock()
 
-    r.topicMap[topic] = &TopicConfig{
-        Mode: topicConcurMode,
-    }
+    r.topicMap[topic] = struct{}{}
 }
 
 // removeTopic 只删除topicMap的topic键，topics中的惰性删除
@@ -65,25 +63,15 @@ func (r *Registry) hasTopic(topic Topic) bool {
     return ok
 }
 
-func (r *Registry) getTopicConfig(topic Topic) *TopicConfig {
+func (r *Registry) ListAllTopics() []Topic {
     topicMapMutex.RLock()
     defer topicMapMutex.RUnlock()
 
-    return r.topicMap[topic]
-}
-
-func (r *Registry) ListAllTopics() map[Topic]*TopicConfig {
-    topicMapMutex.RLock()
-    defer topicMapMutex.RUnlock()
-
-    copyMap := make(map[Topic]*TopicConfig, len(r.topicMap)) 
-    for topic, config := range r.topicMap {
-        nconfig := &TopicConfig{
-            Mode: config.Mode,
-        }
-        copyMap[topic] = nconfig
+    copyTopics := make([]Topic, 0, len(r.topicMap))
+    for topic := range r.topicMap {
+        copyTopics = append(copyTopics, topic)
     }
-    return copyMap
+    return copyTopics
 }
 
 /*

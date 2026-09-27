@@ -21,6 +21,7 @@ type Subscription struct {
 	mode    SubConcurrencyMode
 
 	called atomic.Bool // once执行时使用
+    token chan struct{}
 }
 
 // isOnce 是否限制只能执行一次

@@ -2,41 +2,53 @@ package eventbus
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/snowflake"
-	"github.com/pkg/errors"
 )
 
 type EventBus struct {
-	registry *Registry
+	registry      *Registry       // topic 与 subscription 注册
 	snowflakeNode *snowflake.Node // 雪花算法负责生成唯一的SubscriptionID
+	executor      Executor
 }
 
-func NewEventBus() *EventBus {
+func NewEventBus(poolSize int) *EventBus {
 	node, err := snowflake.NewNode(defaultSnowflakeNode)
 	if err != nil {
 		panic("snowflake newNode failed")
 	}
 
+    if poolSize <= 0 {
+        poolSize = defaultGoPoolSize
+    }
+
+	executor, err := NewExecutor(poolSize)
+	if err != nil {
+		panic("Executor created failed")
+	}
+
 	return &EventBus{
 		registry:      NewRegistry(),
 		snowflakeNode: node,
+		executor:      executor,
 	}
 }
 
-func (b *EventBus) CreateTopic(topic Topic, topicConcurMode TopicConcurrencyMode) {
-    b.registry.createTopic(topic, topicConcurMode)
+func (b *EventBus) CreateTopic(topic Topic) {
+	b.registry.createTopic(topic)
 }
 
 func (b *EventBus) RemoveTopic(topic Topic) {
-    b.registry.removeTopic(topic)
+	b.registry.removeTopic(topic)
 }
 
-func(b *EventBus) ListAllTopics() map[Topic]*TopicConfig {
-    return b.registry.ListAllTopics()
+func (b *EventBus) ListAllTopics() []Topic {
+	return b.registry.ListAllTopics()
+}
+
+func (b *EventBus) RemoveSub(subID SubscriptionID, waitTime time.Duration) error {
+	return b.registry.RemoveSubscription(subID, waitTime)
 }
 
 func (b *EventBus) Subscribe(
@@ -68,13 +80,17 @@ func (b *EventBus) Subscribe(
 	if err = b.registry.AddSubscription(topic, sub, waitTime); err != nil {
 		return nil, err
 	}
+
+	if !sub.isParallel() { // 此时是串行执行
+        sub.token = make(chan struct{})
+	}
 	return sub, nil
 }
 
 func (b *EventBus) Publish(
 	ctx context.Context,
 	event *Event,
-) (results map[SubscriptionID]*Result, err error) {
+) (map[SubscriptionID]*Future, error) {
 
 	if event == nil {
 		return nil, ErrNilEvent
@@ -85,30 +101,11 @@ func (b *EventBus) Publish(
 		return nil, nil
 	}
 
-	results = make(map[SubscriptionID]*Result, len(subs))
-	errIDs := make([]SubscriptionID, 0, len(subs))
-
-    // executor -> handle 
-	for _, sub := range subs {
-		if sub.isOnce() {
-			if !sub.called.CompareAndSwap(false, true) { // 已经执行过了
-				continue
-			}
-		}
-
-		result := sub.handler(ctx, event)
-		if result == nil || result.Err != nil {
-			errIDs = append(errIDs, sub.getID())
-		}
-		results[sub.id] = result
+	futures, err := b.executor.submitTask(ctx, event, subs)
+	if err != nil {
+		return futures, err
 	}
 
-	if len(errIDs) != 0 {
-		var bs strings.Builder
-		bs.WriteString("以下subscriptionID的subscription执行错误:\n")
-		fmt.Fprint(&bs, errIDs)
-		err = errors.Wrap(ErrSubExecutionFailed, bs.String())
-	}
-
-	return results, err
+	b.executor.triggerTask(futures)
+	return futures, nil
 }
