@@ -9,10 +9,6 @@ type Metadata struct {
 	Source    string
 }
 
-type EventOptions struct {
-    SubmitFailuePolicy SubmitFailurePolicy
-}
-
 type Event struct {
 	Type     string
 	Topic    Topic
