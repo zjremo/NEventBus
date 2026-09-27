@@ -13,5 +13,4 @@ type Event struct {
 	Type     string
 	Topic    Topic
 	Metadata *Metadata
-	Payload  any
 }
