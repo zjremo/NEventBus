@@ -10,9 +10,8 @@ type SubscriptionID string
 // Handler 全局adaptor统一适配器
 type Handler func(
 	ctx context.Context,
-	event *Event,
+	event *event,
 ) *Result
-
 
 type Subscription struct {
 	id      SubscriptionID
@@ -21,7 +20,7 @@ type Subscription struct {
 	mode    SubConcurrencyMode
 
 	called atomic.Bool // once执行时使用
-    token chan struct{}
+	token  chan struct{}
 }
 
 // isOnce 是否限制只能执行一次
@@ -30,7 +29,7 @@ func (s *Subscription) isOnce() bool {
 }
 
 func (s *Subscription) isParallel() bool {
-    return s.mode&SubParallel != 0
+	return s.mode&SubParallel != 0
 }
 
 func (s *Subscription) getID() SubscriptionID {

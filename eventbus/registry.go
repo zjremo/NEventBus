@@ -20,8 +20,8 @@ type subscriptionTable struct {
 
 // Registry 持有注册表的引用
 type Registry struct {
-	table atomic.Pointer[subscriptionTable]
-    topicMap map[Topic]struct{}
+	table    atomic.Pointer[subscriptionTable]
+	topicMap map[Topic]struct{}
 }
 
 // NewRegistry 获取一个新的注册仓库
@@ -31,9 +31,9 @@ func NewRegistry() *Registry {
 		subIds: make(map[SubscriptionID]*Subscription),
 	}
 
-    registry := &Registry{
-        topicMap: make(map[Topic]struct{}),
-    }
+	registry := &Registry{
+		topicMap: make(map[Topic]struct{}),
+	}
 	registry.table.Store(table)
 
 	return registry
@@ -41,37 +41,37 @@ func NewRegistry() *Registry {
 
 // createTopic 创建Topic
 func (r *Registry) createTopic(topic Topic) {
-    topicMapMutex.Lock()
-    defer topicMapMutex.Unlock()
+	topicMapMutex.Lock()
+	defer topicMapMutex.Unlock()
 
-    r.topicMap[topic] = struct{}{}
+	r.topicMap[topic] = struct{}{}
 }
 
 // removeTopic 只删除topicMap的topic键，topics中的惰性删除
 func (r *Registry) removeTopic(topic Topic) {
-    topicMapMutex.Lock()
-    defer topicMapMutex.Unlock()
+	topicMapMutex.Lock()
+	defer topicMapMutex.Unlock()
 
-    delete(r.topicMap, topic)
+	delete(r.topicMap, topic)
 }
 
 func (r *Registry) hasTopic(topic Topic) bool {
-    topicMapMutex.RLock()
-    defer topicMapMutex.RUnlock()
+	topicMapMutex.RLock()
+	defer topicMapMutex.RUnlock()
 
-    _, ok := r.topicMap[topic]
-    return ok
+	_, ok := r.topicMap[topic]
+	return ok
 }
 
 func (r *Registry) ListAllTopics() []Topic {
-    topicMapMutex.RLock()
-    defer topicMapMutex.RUnlock()
+	topicMapMutex.RLock()
+	defer topicMapMutex.RUnlock()
 
-    copyTopics := make([]Topic, 0, len(r.topicMap))
-    for topic := range r.topicMap {
-        copyTopics = append(copyTopics, topic)
-    }
-    return copyTopics
+	copyTopics := make([]Topic, 0, len(r.topicMap))
+	for topic := range r.topicMap {
+		copyTopics = append(copyTopics, topic)
+	}
+	return copyTopics
 }
 
 /*
@@ -87,40 +87,40 @@ func (r *Registry) Lookup(topic Topic) (subscriptions []*Subscription) {
 			return nil
 		}
 
-        // 查询TopicMap来获取是否真实存在topic
-        hasTopic := r.hasTopic(topic)
-        var newSubmap map[SubscriptionID]struct{}
+		// 查询TopicMap来获取是否真实存在topic
+		hasTopic := r.hasTopic(topic)
+		var newSubmap map[SubscriptionID]struct{}
 
-        if hasTopic {
-            subscriptions = make([]*Subscription, 0, len(submap))
-            newSubmap = make(map[SubscriptionID]struct{}, len(submap))
+		if hasTopic {
+			subscriptions = make([]*Subscription, 0, len(submap))
+			newSubmap = make(map[SubscriptionID]struct{}, len(submap))
 
-            stale := false
-            for subID := range submap {
-                sub, ok := oldTable.subIds[subID]
-                if !ok {
-                    stale = true
-                    continue
-                }
+			stale := false
+			for subID := range submap {
+				sub, ok := oldTable.subIds[subID]
+				if !ok {
+					stale = true
+					continue
+				}
 
-                subscriptions = append(subscriptions, sub)
-                newSubmap[subID] = struct{}{}
-            }
+				subscriptions = append(subscriptions, sub)
+				newSubmap[subID] = struct{}{}
+			}
 
-            if !stale { // 没有要lazy delete的
-                return
-            }
-        }
+			if !stale { // 没有要lazy delete的
+				return
+			}
+		}
 
 		// 此时执行lazy delete操作
 		newTopics := make(map[Topic]map[SubscriptionID]struct{}, len(oldTable.topics))
 		maps.Copy(newTopics, oldTable.topics)
 
-        if hasTopic {
-		    newTopics[topic] = newSubmap
-        } else {
-            delete(newTopics, topic)
-        }
+		if hasTopic {
+			newTopics[topic] = newSubmap
+		} else {
+			delete(newTopics, topic)
+		}
 
 		newTable := &subscriptionTable{
 			topics: newTopics,
@@ -183,7 +183,7 @@ func (r *Registry) AddSubscription(topic Topic, sub *Subscription, waitTime time
 			// 1. modify topics
 			subMap, ok := newTable.topics[topic]
 			if !ok || !r.hasTopic(topic) {
-                return ErrTopicNotFound 
+				return ErrTopicNotFound
 			}
 			subMap[sub.id] = struct{}{}
 
