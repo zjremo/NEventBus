@@ -12,35 +12,36 @@ const (
 )
 
 const (
-    defaultSubscriptionQueueSize = 10
+	defaultSubscriptionQueueSize = 10
 )
 
 // SubConcurrencyMode 不同Publish之间对于Subscription的执行模式
 type SubConcurrencyMode uint8
+
 const (
-    SubSerial SubConcurrencyMode = iota
-    SubParallel
+	SubSerial SubConcurrencyMode = iota
+	SubParallel
 )
 
 // SubscriptionFlag 回调触发标志位
 type SubscriptionFlag uint8
 
 const (
-    FlagNone SubscriptionFlag = 0
-	FlagOnce SubscriptionFlag = 1 << iota// 限制只能执行一次
+	FlagNone SubscriptionFlag = 0
+	FlagOnce SubscriptionFlag = 1 << iota // 限制只能执行一次
 )
 
 // SubmitFailurePolicy 提交Subscription任务失败后的策略
 type SubmitFailurePolicy uint8
 
 const (
-    SubmitFailureContinue SubmitFailurePolicy = iota // 其他Subscription继续执行 
-    SubmitFailureAbort // 其他Subscription停止执行
+	SubmitFailureContinue SubmitFailurePolicy = iota // 其他Subscription继续执行
+	SubmitFailureAbort                               // 其他Subscription停止执行
 )
 
 const (
-    // defaultSnowflakeNode 雪花算法默认初始化Node使用
+	// defaultSnowflakeNode 雪花算法默认初始化Node使用
 	defaultSnowflakeNode = 22
-    // defaultGoPoolSize 执行器协程池默认大小
-    defaultGoPoolSize = 100
+	// defaultGoPoolSize 执行器协程池默认大小
+	defaultGoPoolSize = 100
 )

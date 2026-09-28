@@ -14,4 +14,5 @@ var (
 	ErrExceedMaxRetry              = errors.New("exceeded maximum number of retries!")
 	ErrInvalidSubMode              = errors.New("subscription: subMode is invalid")
 	ErrSubscriptionAlreadyExecuted = errors.New("subscription: subscription once has been executed")
+	ErrEventBusClosed              = errors.New("eventbus: eventbus has been closed, not accepted any operations")
 )

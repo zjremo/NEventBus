@@ -2,62 +2,112 @@ package eventbus
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/snowflake"
 )
 
-type EventBus struct {
+type EventBus interface {
+	// Topic Operations
+	CreateTopic(topic Topic) error
+	RemoveTopic(topic Topic) error
+	ListAllTopics() ([]Topic, error)
+
+	// Subscription Operations
+	RemoveSub(subID SubscriptionID, waitTime time.Duration) error
+	Subscribe(topic Topic, handler Handler, isOnce bool, subConcurMode SubConcurrencyMode, waitTime time.Duration) (sub *Subscription, err error)
+
+	// Event Operations
+	CreateEvent(typeDesc string, topic Topic, source string) (*event, error)
+	PublishEvent(ctx context.Context, event *event) (map[SubscriptionID]*Future, error)
+
+	// Exit
+	Close()
+}
+
+var _ EventBus = (*eventBus)(nil)
+
+type eventBus struct {
 	registry      *Registry       // topic 与 subscription 注册
 	snowflakeNode *snowflake.Node // 雪花算法负责生成唯一的SubscriptionID
 	executor      Executor
+
+	closed atomic.Bool
 }
 
-func NewEventBus(poolSize int) *EventBus {
+func NewEventBus(poolSize int) EventBus {
 	node, err := snowflake.NewNode(defaultSnowflakeNode)
 	if err != nil {
 		panic("snowflake newNode failed")
 	}
 
-    if poolSize <= 0 {
-        poolSize = defaultGoPoolSize
-    }
+	if poolSize <= 0 {
+		poolSize = defaultGoPoolSize
+	}
 
 	executor, err := NewExecutor(poolSize)
 	if err != nil {
 		panic("Executor created failed")
 	}
 
-	return &EventBus{
+	return &eventBus{
 		registry:      NewRegistry(),
 		snowflakeNode: node,
 		executor:      executor,
 	}
 }
 
-func (b *EventBus) CreateTopic(topic Topic) {
+func (b *eventBus) checkClose() bool {
+	return b.closed.Load()
+}
+
+func (b *eventBus) CreateTopic(topic Topic) error {
+	if b.checkClose() {
+		return ErrEventBusClosed
+	}
+
 	b.registry.createTopic(topic)
+	return nil
 }
 
-func (b *EventBus) RemoveTopic(topic Topic) {
+func (b *eventBus) RemoveTopic(topic Topic) error {
+	if b.checkClose() {
+		return ErrEventBusClosed
+	}
+
 	b.registry.removeTopic(topic)
+	return nil
 }
 
-func (b *EventBus) ListAllTopics() []Topic {
-	return b.registry.ListAllTopics()
+func (b *eventBus) ListAllTopics() ([]Topic, error) {
+	if b.checkClose() {
+		return nil, ErrEventBusClosed
+	}
+
+	return b.registry.ListAllTopics(), nil
 }
 
-func (b *EventBus) RemoveSub(subID SubscriptionID, waitTime time.Duration) error {
+func (b *eventBus) RemoveSub(subID SubscriptionID, waitTime time.Duration) error {
+	if b.checkClose() {
+		return ErrEventBusClosed
+	}
+
 	return b.registry.RemoveSubscription(subID, waitTime)
 }
 
-func (b *EventBus) Subscribe(
+func (b *eventBus) Subscribe(
 	topic Topic,
 	handler Handler,
 	isOnce bool,
 	subConcurMode SubConcurrencyMode,
 	waitTime time.Duration,
 ) (sub *Subscription, err error) {
+
+	if b.checkClose() {
+		return nil, ErrEventBusClosed
+	}
+
 	if len(topic) == 0 {
 		return nil, ErrEmptyTopic
 	}
@@ -82,15 +132,19 @@ func (b *EventBus) Subscribe(
 	}
 
 	if !sub.isParallel() { // 此时是串行执行
-        sub.token = make(chan struct{})
+		sub.token = make(chan struct{})
 	}
 	return sub, nil
 }
 
-func (b *EventBus) Publish(
+func (b *eventBus) PublishEvent(
 	ctx context.Context,
-	event *Event,
+	event *event,
 ) (map[SubscriptionID]*Future, error) {
+
+	if b.checkClose() {
+		return nil, ErrEventBusClosed
+	}
 
 	if event == nil {
 		return nil, ErrNilEvent
@@ -108,4 +162,35 @@ func (b *EventBus) Publish(
 
 	b.executor.triggerTask(futures)
 	return futures, nil
+}
+
+func (b *eventBus) CreateEvent(typeDesc string, topic Topic, source string) (*event, error) {
+	if b.checkClose() {
+		return nil, ErrEventBusClosed
+	}
+
+	requestID := b.snowflakeNode.Generate().Base36()
+	traceID := b.snowflakeNode.Generate().Base36()
+
+	metadata := &metadata{
+		TraceID:   traceID,
+		RequestID: requestID,
+		Source:    source,
+	}
+
+	return &event{
+		Type:     typeDesc,
+		Topic:    topic,
+		Metadata: metadata,
+	}, nil
+}
+
+func (b *eventBus) Close() {
+	// cas来修改closed变量
+	if !b.closed.CompareAndSwap(false, true) {
+		return
+	}
+
+	// 关闭executor资源, 调用接口方法
+	b.executor.close()
 }

@@ -10,8 +10,11 @@ import (
 var _ Executor = (*executor)(nil)
 
 type Executor interface {
-	submitTask(ctx context.Context, event *Event, subs []*Subscription) (map[SubscriptionID]*Future, error)
+	submitTask(ctx context.Context, event *event, subs []*Subscription) (map[SubscriptionID]*Future, error)
 	triggerTask(futures map[SubscriptionID]*Future)
+
+	// exit
+	close()
 }
 
 type executor struct {
@@ -33,7 +36,7 @@ func NewExecutor(size int) (Executor, error) {
 	}, nil
 }
 
-func (e *executor) submitTask(ctx context.Context, event *Event, subs []*Subscription) (map[SubscriptionID]*Future, error) {
+func (e *executor) submitTask(ctx context.Context, event *event, subs []*Subscription) (map[SubscriptionID]*Future, error) {
 	futures := make(map[SubscriptionID]*Future, len(subs))
 
 	for _, sub := range subs {
@@ -65,13 +68,13 @@ func (e *executor) triggerSerial(future *Future) {
 	select {
 	case <-future.ctx.Done():
 		future.complete(NewResultErr(future.ctx.Err()))
-    default:
-        future.sub.token <- struct{}{}
-        defer func(){
-            <-future.sub.token
-        }()
-        result := future.sub.handler(future.ctx, future.event)
-        future.complete(result)
+	default:
+		future.sub.token <- struct{}{}
+		defer func() {
+			<-future.sub.token
+		}()
+		result := future.sub.handler(future.ctx, future.event)
+		future.complete(result)
 	}
 }
 
@@ -92,4 +95,8 @@ func (e *executor) triggerParallel(future *Future) {
 	if err != nil {
 		future.complete(NewResultErr(errors.Wrap(err, "submit task to executor pool")))
 	}
+}
+
+func (e *executor) close() {
+	e.pool.Release()
 }
