@@ -6,13 +6,11 @@ import "time"
 const (
 	defaultAddSubscriptionTimeout    = time.Duration(2) * time.Second
 	defaultRemoveSubscriptionTimeout = time.Duration(2) * time.Second
-	defaultAddSubscriptionRetry      = 5 // 尝试添加subscription最大cas尝试次数
-	defaultRemoveSubscriptionRetry   = 5 // 尝试删除subscription最大cas尝试次数
-	defaultLazyRemoveSubRetry        = 5 // 惰性删除每次lookup尝试次数
-)
-
-const (
-	defaultSubscriptionQueueSize = 10
+	defaultAddSubscriptionRetry      = 5   // 尝试添加subscription最大cas尝试次数
+	defaultRemoveSubscriptionRetry   = 5   // 尝试删除subscription最大cas尝试次数
+	defaultLazyRemoveSubRetry        = 5   // 惰性删除每次lookup尝试次数
+	defaultSubQueueSize              = 500 // subscription任务队列大小
+	defaultSubConsumerAliveTimeout   = time.Duration(5) * time.Second
 )
 
 // SubConcurrencyMode 不同Publish之间对于Subscription的执行模式

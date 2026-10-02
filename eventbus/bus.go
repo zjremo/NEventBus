@@ -19,8 +19,8 @@ type EventBus interface {
 	Subscribe(topic Topic, handler Handler, isOnce bool, subConcurMode SubConcurrencyMode, waitTime time.Duration) (sub *Subscription, err error)
 
 	// Event Operations
-	CreateEvent(typeDesc string, topic Topic, source string) (*event, error)
-	PublishEvent(ctx context.Context, event *event) (map[SubscriptionID]*Future, error)
+	CreateEvent(typeDesc string, topic Topic, source string) (*Event, error)
+	PublishEvent(ctx context.Context, event *Event) (map[SubscriptionID]*Future, error)
 
 	// Exit
 	Close()
@@ -132,14 +132,14 @@ func (b *eventBus) Subscribe(
 	}
 
 	if !sub.isParallel() { // 此时是串行执行
-		sub.token = make(chan struct{})
+        sub.queue = make(chan *Future, defaultSubQueueSize)
 	}
 	return sub, nil
 }
 
 func (b *eventBus) PublishEvent(
 	ctx context.Context,
-	event *event,
+	event *Event,
 ) (map[SubscriptionID]*Future, error) {
 
 	if b.checkClose() {
@@ -150,7 +150,7 @@ func (b *eventBus) PublishEvent(
 		return nil, ErrNilEvent
 	}
 
-	subs := b.registry.Lookup(event.Topic)
+	subs := b.registry.Lookup(event.topic)
 	if len(subs) == 0 {
 		return nil, nil
 	}
@@ -164,33 +164,33 @@ func (b *eventBus) PublishEvent(
 	return futures, nil
 }
 
-func (b *eventBus) CreateEvent(typeDesc string, topic Topic, source string) (*event, error) {
+func (b *eventBus) CreateEvent(typeDesc string, topic Topic, source string) (*Event, error) {
 	if b.checkClose() {
 		return nil, ErrEventBusClosed
 	}
 
-	requestID := b.snowflakeNode.Generate().Base36()
-	traceID := b.snowflakeNode.Generate().Base36()
-
-	metadata := &metadata{
-		TraceID:   traceID,
-		RequestID: requestID,
-		Source:    source,
+	metadata := &Metadata{
+		traceID:   b.snowflakeNode.Generate().Base36(),
+		requestID: b.snowflakeNode.Generate().Base36(),
+		source:    source,
 	}
 
-	return &event{
-		Type:     typeDesc,
-		Topic:    topic,
-		Metadata: metadata,
+	return &Event{
+		typeDesc: typeDesc,
+		topic:    topic,
+		metadata: metadata,
 	}, nil
 }
 
 func (b *eventBus) Close() {
-	// cas来修改closed变量
+    // Step1: cas来修改closed变量，关闭eventbus入口
 	if !b.closed.CompareAndSwap(false, true) {
 		return
 	}
 
-	// 关闭executor资源, 调用接口方法
+    // Step2: 关闭executor资源, 调用接口方法。同时subscription内部的消费者最终都会因为存活时间而退出
 	b.executor.close()
+
+    // Step3: 释放registry，内部会调用subscription的释放方法来关闭任务队列
+    b.registry.release()
 }
