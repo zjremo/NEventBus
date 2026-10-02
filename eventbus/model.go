@@ -31,13 +31,13 @@ type Future struct {
 	Result *Result
 
 	ctx   context.Context
-	event *event
+	event *Event
 	sub   *Subscription
 }
 
 func NewFuture(
 	ctx context.Context,
-	event *event,
+	event *Event,
 	sub *Subscription,
 ) *Future {
 	return &Future{
