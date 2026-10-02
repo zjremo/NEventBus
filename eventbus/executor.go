@@ -69,15 +69,21 @@ func (e *executor) triggerSerial(future *Future) {
 }
 
 func (e *executor) enqueueSub(future *Future) {
-    sub := future.sub
+	sub := future.sub
 
-    sub.queue <- future
+	// 需要拉起消费者时：先 Submit，失败则直接 complete，避免已入队后再 complete 导致二次关闭
+	if sub.consumerRun.CompareAndSwap(false, true) {
+		err := e.pool.Submit(func() {
+			sub.consume()
+		})
+		if err != nil {
+			sub.consumerRun.Store(false)
+			future.complete(NewResultErr(errors.Wrap(err, "submit consumer task to pool")))
+			return
+		}
+	}
 
-    if sub.consumerRun.CompareAndSwap(false, true) {
-        e.pool.Submit(func() {
-            sub.consume()
-        })
-    }
+	sub.queue <- future
 }
 
 func (e *executor) triggerParallel(future *Future) {

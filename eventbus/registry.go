@@ -17,9 +17,9 @@ type subscriptionTable struct {
 
 // Registry 持有注册表的引用
 type Registry struct {
-	table    atomic.Pointer[subscriptionTable]
-	topicMap map[Topic]struct{}
-    topicMapMutex sync.RWMutex
+	table         atomic.Pointer[subscriptionTable]
+	topicMap      map[Topic]struct{}
+	topicMapMutex sync.RWMutex
 }
 
 // NewRegistry 获取一个新的注册仓库
@@ -37,12 +37,33 @@ func NewRegistry() *Registry {
 	return registry
 }
 
-// createTopic 创建Topic
+// createTopic 创建 Topic：先 CAS 写入订阅表空集合，成功后再写 topicMap，
+// 保证「表内存在」与「topicMap 可见」在同一把锁下提交，具备事务性。
 func (r *Registry) createTopic(topic Topic) {
 	r.topicMapMutex.Lock()
 	defer r.topicMapMutex.Unlock()
 
-	r.topicMap[topic] = struct{}{}
+	for range defaultAddSubscriptionRetry {
+		oldTable := r.table.Load()
+		if _, ok := oldTable.topics[topic]; ok {
+			// 表中已有（例如 RemoveTopic 后尚未惰删）：补齐 topicMap，避免只建表不建索引
+			r.topicMap[topic] = struct{}{}
+			return
+		}
+
+		newTopics := make(map[Topic]map[SubscriptionID]struct{}, len(oldTable.topics)+1)
+		maps.Copy(newTopics, oldTable.topics)
+		newTopics[topic] = make(map[SubscriptionID]struct{})
+
+		newTable := &subscriptionTable{
+			topics: newTopics,
+			subIds: oldTable.subIds,
+		}
+		if r.table.CompareAndSwap(oldTable, newTable) {
+			r.topicMap[topic] = struct{}{}
+			return
+		}
+	}
 }
 
 // removeTopic 只删除topicMap的topic键，topics中的惰性删除
@@ -135,6 +156,7 @@ func (r *Registry) Lookup(topic Topic) (subscriptions []*Subscription) {
 /* Cow机制，克隆table写入，然后替换引用 */
 // cloneTableWithTopic 仅仅深拷贝要修改Topic下注册触发器，其他一律浅拷贝
 // 如果Topic是新的不存在的，那么全量浅拷贝
+// 前置条件：调用方已通过 CreateTopic 保证 Topic 存在于 table.topics
 func (r *Registry) cloneTableWithTopic(old *subscriptionTable, topic Topic) *subscriptionTable {
 	newTopics := make(map[Topic]map[SubscriptionID]struct{}, len(old.topics))
 	newSubIds := make(map[SubscriptionID]*Subscription, len(old.subIds))
@@ -236,11 +258,11 @@ func (r *Registry) RemoveSubscription(subID SubscriptionID, waitTime time.Durati
 }
 
 func (r *Registry) release() {
-    table := r.table.Load()
+	table := r.table.Load()
 
-    for _, sub := range table.subIds {
-        sub.release()
-    }
+	for _, sub := range table.subIds {
+		sub.release()
+	}
 }
 
 func copySubMap(subMap map[SubscriptionID]struct{}) map[SubscriptionID]struct{} {

@@ -41,43 +41,58 @@ func (s *Subscription) getID() SubscriptionID {
 	return s.id
 }
 
-// consume subscription单消费者handler函数
+// ID 返回订阅唯一标识，供 RemoveSub 等外部操作使用
+func (s *Subscription) ID() SubscriptionID {
+	return s.id
+}
+
+// consume subscription 单消费者：存活至空闲超时；仅在超时退出时清除 consumerRun，
+// 处理中 / 短等待期间保持 true，使并发 Publish 只需入队、不必重复拉起消费者。
 func (s *Subscription) consume() {
-    for {
-        select {
-        case future, ok := <- s.queue:
-            if !ok {
-                return
-            }
+	for {
+		select {
+		case future, ok := <-s.queue:
+			if !ok {
+				return
+			}
 
-            result := s.handler(
-                future.ctx,
-                future.event,
-            )
-            future.complete(result)
+			result := s.handler(
+				future.ctx,
+				future.event,
+			)
+			future.complete(result)
 
-        default:
-            timer := time.NewTimer(defaultSubConsumerAliveTimeout)
+		default:
+			timer := time.NewTimer(defaultSubConsumerAliveTimeout)
 
-            select {
-            case future, ok := <- s.queue:
-                if !ok {
-                    return
-                }
+			select {
+			case future, ok := <-s.queue:
+				timer.Stop()
+				if !ok {
+					return
+				}
 
-                result := s.handler(
-                    future.ctx,
-                    future.event,
-                )
-                future.complete(result)
+				result := s.handler(
+					future.ctx,
+					future.event,
+				)
+				future.complete(result)
 
-            case <-timer.C:
-                return
-            }
-        }
-    }
+			case <-timer.C:
+				// 仅空闲超时才清除标志；若清除后队列又有任务，尝试续命，避免任务滞留
+				s.consumerRun.Store(false)
+				if len(s.queue) > 0 && s.consumerRun.CompareAndSwap(false, true) {
+					continue
+				}
+				return
+			}
+		}
+	}
 }
 
 func (s *Subscription) release() {
-    close(s.queue)
+	// 并行模式下不创建 queue，避免 close(nil) panic
+	if s.queue != nil {
+		close(s.queue)
+	}
 }
