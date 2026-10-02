@@ -9,9 +9,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// topicMapMutex 创建topic的频率很低，基本不存在并发问题，直接利用读写锁即可
-var topicMapMutex sync.RWMutex
-
 // subscriptionTable 注册表
 type subscriptionTable struct {
 	topics map[Topic]map[SubscriptionID]struct{} // topic -> subs
@@ -22,6 +19,7 @@ type subscriptionTable struct {
 type Registry struct {
 	table    atomic.Pointer[subscriptionTable]
 	topicMap map[Topic]struct{}
+    topicMapMutex sync.RWMutex
 }
 
 // NewRegistry 获取一个新的注册仓库
@@ -41,31 +39,31 @@ func NewRegistry() *Registry {
 
 // createTopic 创建Topic
 func (r *Registry) createTopic(topic Topic) {
-	topicMapMutex.Lock()
-	defer topicMapMutex.Unlock()
+	r.topicMapMutex.Lock()
+	defer r.topicMapMutex.Unlock()
 
 	r.topicMap[topic] = struct{}{}
 }
 
 // removeTopic 只删除topicMap的topic键，topics中的惰性删除
 func (r *Registry) removeTopic(topic Topic) {
-	topicMapMutex.Lock()
-	defer topicMapMutex.Unlock()
+	r.topicMapMutex.Lock()
+	defer r.topicMapMutex.Unlock()
 
 	delete(r.topicMap, topic)
 }
 
 func (r *Registry) hasTopic(topic Topic) bool {
-	topicMapMutex.RLock()
-	defer topicMapMutex.RUnlock()
+	r.topicMapMutex.RLock()
+	defer r.topicMapMutex.RUnlock()
 
 	_, ok := r.topicMap[topic]
 	return ok
 }
 
 func (r *Registry) ListAllTopics() []Topic {
-	topicMapMutex.RLock()
-	defer topicMapMutex.RUnlock()
+	r.topicMapMutex.RLock()
+	defer r.topicMapMutex.RUnlock()
 
 	copyTopics := make([]Topic, 0, len(r.topicMap))
 	for topic := range r.topicMap {
@@ -235,6 +233,14 @@ func (r *Registry) RemoveSubscription(subID SubscriptionID, waitTime time.Durati
 	}
 
 	return errors.Wrapf(ErrExceedMaxRetry, "Remove subscription, subscriptionID: %s", subID)
+}
+
+func (r *Registry) release() {
+    table := r.table.Load()
+
+    for _, sub := range table.subIds {
+        sub.release()
+    }
 }
 
 func copySubMap(subMap map[SubscriptionID]struct{}) map[SubscriptionID]struct{} {

@@ -10,7 +10,7 @@ import (
 var _ Executor = (*executor)(nil)
 
 type Executor interface {
-	submitTask(ctx context.Context, event *event, subs []*Subscription) (map[SubscriptionID]*Future, error)
+	submitTask(ctx context.Context, event *Event, subs []*Subscription) (map[SubscriptionID]*Future, error)
 	triggerTask(futures map[SubscriptionID]*Future)
 
 	// exit
@@ -36,7 +36,7 @@ func NewExecutor(size int) (Executor, error) {
 	}, nil
 }
 
-func (e *executor) submitTask(ctx context.Context, event *event, subs []*Subscription) (map[SubscriptionID]*Future, error) {
+func (e *executor) submitTask(ctx context.Context, event *Event, subs []*Subscription) (map[SubscriptionID]*Future, error) {
 	futures := make(map[SubscriptionID]*Future, len(subs))
 
 	for _, sub := range subs {
@@ -65,17 +65,19 @@ func (e *executor) triggerSerial(future *Future) {
 		return
 	}
 
-	select {
-	case <-future.ctx.Done():
-		future.complete(NewResultErr(future.ctx.Err()))
-	default:
-		future.sub.token <- struct{}{}
-		defer func() {
-			<-future.sub.token
-		}()
-		result := future.sub.handler(future.ctx, future.event)
-		future.complete(result)
-	}
+    e.enqueueSub(future)
+}
+
+func (e *executor) enqueueSub(future *Future) {
+    sub := future.sub
+
+    sub.queue <- future
+
+    if sub.consumerRun.CompareAndSwap(false, true) {
+        e.pool.Submit(func() {
+            sub.consume()
+        })
+    }
 }
 
 func (e *executor) triggerParallel(future *Future) {
