@@ -37,16 +37,16 @@ type eventBus struct {
 }
 
 func NewEventBus(poolSize int) EventBus {
-	node, err := snowflake.NewNode(defaultSnowflakeNode)
+	return NewEventBusWithOptions(Options{PoolSize: poolSize})
+}
+
+func NewEventBusWithOptions(opt Options) EventBus {
+	node, err := snowflake.NewNode(opt.snowflakeNode())
 	if err != nil {
-		panic("snowflake newNode failed")
+		panic("snowflake newNode failed: " + err.Error())
 	}
 
-	if poolSize <= 0 {
-		poolSize = defaultGoPoolSize
-	}
-
-	executor, err := NewExecutor(poolSize)
+	executor, err := NewExecutor(opt.poolSize())
 	if err != nil {
 		panic("Executor created failed")
 	}
@@ -132,7 +132,7 @@ func (b *eventBus) Subscribe(
 	}
 
 	if !sub.isParallel() { // 此时是串行执行
-        sub.queue = make(chan *Future, defaultSubQueueSize)
+		sub.queue = make(chan *Future, defaultSubQueueSize)
 	}
 	return sub, nil
 }
@@ -183,14 +183,12 @@ func (b *eventBus) CreateEvent(typeDesc string, topic Topic, source string) (*Ev
 }
 
 func (b *eventBus) Close() {
-    // Step1: cas来修改closed变量，关闭eventbus入口
 	if !b.closed.CompareAndSwap(false, true) {
 		return
 	}
 
-    // Step2: 关闭executor资源, 调用接口方法。同时subscription内部的消费者最终都会因为存活时间而退出
+	// 先关闭 Serial 队列：唤醒消费者并排空已入队任务
+	b.registry.release()
+	// 再等待池内 handler / 消费者退出（超时后不再阻塞 Close）
 	b.executor.close()
-
-    // Step3: 释放registry，内部会调用subscription的释放方法来关闭任务队列
-    b.registry.release()
 }

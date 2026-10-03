@@ -6,11 +6,9 @@ import "time"
 const (
 	defaultAddSubscriptionTimeout    = time.Duration(2) * time.Second
 	defaultRemoveSubscriptionTimeout = time.Duration(2) * time.Second
-	defaultAddSubscriptionRetry      = 5   // 尝试添加subscription最大cas尝试次数
-	defaultRemoveSubscriptionRetry   = 5   // 尝试删除subscription最大cas尝试次数
-	defaultLazyRemoveSubRetry        = 5   // 惰性删除每次lookup尝试次数
-	defaultSubQueueSize              = 500 // subscription任务队列大小
+	defaultSubQueueSize              = 256
 	defaultSubConsumerAliveTimeout   = time.Duration(5) * time.Second
+	defaultCloseDrainTimeout         = time.Duration(5) * time.Second
 )
 
 // SubConcurrencyMode 不同Publish之间对于Subscription的执行模式
@@ -27,14 +25,6 @@ type SubscriptionFlag uint8
 const (
 	FlagNone SubscriptionFlag = 0
 	FlagOnce SubscriptionFlag = 1 << iota // 限制只能执行一次
-)
-
-// SubmitFailurePolicy 提交Subscription任务失败后的策略
-type SubmitFailurePolicy uint8
-
-const (
-	SubmitFailureContinue SubmitFailurePolicy = iota // 其他Subscription继续执行
-	SubmitFailureAbort                               // 其他Subscription停止执行
 )
 
 const (

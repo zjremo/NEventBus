@@ -10,31 +10,31 @@ type Metadata struct {
 }
 
 func (m *Metadata) TraceID() string {
-    return m.traceID
+	return m.traceID
 }
 
 func (m *Metadata) RequestID() string {
-    return m.requestID
+	return m.requestID
 }
 
 func (m *Metadata) Source() string {
-    return m.source
+	return m.source
 }
 
 type Event struct {
-	typeDesc     string
+	typeDesc string
 	topic    Topic
 	metadata *Metadata
 }
 
 func (e *Event) TypeDesc() string {
-    return e.typeDesc
+	return e.typeDesc
 }
 
 func (e *Event) Topic() Topic {
-    return e.topic
+	return e.topic
 }
 
 func (e *Event) Metadata() *Metadata {
-    return e.metadata
-} 
+	return e.metadata
+}

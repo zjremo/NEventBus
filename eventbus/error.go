@@ -15,4 +15,6 @@ var (
 	ErrInvalidSubMode              = errors.New("subscription: subMode is invalid")
 	ErrSubscriptionAlreadyExecuted = errors.New("subscription: subscription once has been executed")
 	ErrEventBusClosed              = errors.New("eventbus: eventbus has been closed, not accepted any operations")
+	ErrSubQueueFull                = errors.New("eventbus: serial subscription queue is full")
+	ErrHandlerPanic                = errors.New("eventbus: handler panic")
 )

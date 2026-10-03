@@ -2,8 +2,11 @@ package eventbus
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type SubscriptionID string
@@ -20,12 +23,13 @@ type Subscription struct {
 	flag    SubscriptionFlag
 	mode    SubConcurrencyMode
 
-
 	called atomic.Bool // once执行时使用
 
-    // subscription 多publish时串行控制
-    queue chan *Future // 存储串行任务 
-    consumerRun atomic.Bool // 此时是否存在消费者协程
+	topic Topic
+
+	// subscription 多publish时串行控制
+	queue       chan *Future // 存储串行任务
+	consumerRun atomic.Bool  // 此时是否存在消费者协程
 }
 
 // isOnce 是否限制只能执行一次
@@ -46,6 +50,21 @@ func (s *Subscription) ID() SubscriptionID {
 	return s.id
 }
 
+// invokeHandler 执行业务回调；panic 转为 Future 错误，避免打挂池 worker。
+func invokeHandler(sub *Subscription, ctx context.Context, event *Event) (result *Result) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			result = NewResultErr(errors.Wrap(ErrHandlerPanic, fmt.Sprint(rec)))
+		}
+	}()
+
+	result = sub.handler(ctx, event)
+	if result == nil {
+		result = NewResultOK(nil)
+	}
+	return result
+}
+
 // consume subscription 单消费者：存活至空闲超时；仅在超时退出时清除 consumerRun，
 // 处理中 / 短等待期间保持 true，使并发 Publish 只需入队、不必重复拉起消费者。
 func (s *Subscription) consume() {
@@ -55,12 +74,7 @@ func (s *Subscription) consume() {
 			if !ok {
 				return
 			}
-
-			result := s.handler(
-				future.ctx,
-				future.event,
-			)
-			future.complete(result)
+			future.complete(invokeHandler(s, future.ctx, future.event))
 
 		default:
 			timer := time.NewTimer(defaultSubConsumerAliveTimeout)
@@ -71,15 +85,9 @@ func (s *Subscription) consume() {
 				if !ok {
 					return
 				}
-
-				result := s.handler(
-					future.ctx,
-					future.event,
-				)
-				future.complete(result)
+				future.complete(invokeHandler(s, future.ctx, future.event))
 
 			case <-timer.C:
-				// 仅空闲超时才清除标志；若清除后队列又有任务，尝试续命，避免任务滞留
 				s.consumerRun.Store(false)
 				if len(s.queue) > 0 && s.consumerRun.CompareAndSwap(false, true) {
 					continue
