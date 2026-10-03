@@ -65,19 +65,39 @@ func (e *executor) triggerSerial(future *Future) {
 		return
 	}
 
-    e.enqueueSub(future)
+	e.enqueueSub(future)
 }
 
 func (e *executor) enqueueSub(future *Future) {
-    sub := future.sub
+	sub := future.sub
 
-    sub.queue <- future
+	if sub.consumerRun.CompareAndSwap(false, true) {
+		err := e.pool.Submit(func() {
+			sub.consume()
+		})
+		if err != nil {
+			sub.consumerRun.Store(false)
+			future.complete(NewResultErr(errors.Wrap(err, "submit consumer task to pool")))
+			return
+		}
+	}
 
-    if sub.consumerRun.CompareAndSwap(false, true) {
-        e.pool.Submit(func() {
-            sub.consume()
-        })
-    }
+	e.tryEnqueue(sub, future)
+}
+
+func (e *executor) tryEnqueue(sub *Subscription, future *Future) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			// Close 后 queue 已关闭：send panic，视为投递失败
+			future.complete(NewResultErr(ErrEventBusClosed))
+		}
+	}()
+
+	select {
+	case sub.queue <- future:
+	default:
+		future.complete(NewResultErr(ErrSubQueueFull))
+	}
 }
 
 func (e *executor) triggerParallel(future *Future) {
@@ -87,11 +107,7 @@ func (e *executor) triggerParallel(future *Future) {
 	}
 
 	err := e.pool.Submit(func() {
-		result := future.sub.handler(
-			future.ctx,
-			future.event,
-		)
-		future.complete(result)
+		future.complete(invokeHandler(future.sub, future.ctx, future.event))
 	})
 
 	if err != nil {
@@ -100,5 +116,5 @@ func (e *executor) triggerParallel(future *Future) {
 }
 
 func (e *executor) close() {
-	e.pool.Release()
+	_ = e.pool.ReleaseTimeout(defaultCloseDrainTimeout)
 }

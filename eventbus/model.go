@@ -2,6 +2,8 @@ package eventbus
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 )
 
 type Result struct {
@@ -25,10 +27,18 @@ func NewResultErr(err error) *Result {
 	}
 }
 
-// Future 包装result，同时利用channel来解耦提交和执行过程
+var futurePool = sync.Pool{
+	New: func() any {
+		return &Future{}
+	},
+}
+
+// Future 包装 result。Wait 可调用多次；第一次 Wait 返回后对象可能被回收进池，下次wait可能等待的是其他的任务结果
 type Future struct {
-	done   chan struct{} // subscription执行成功
-	Result *Result
+	completed atomic.Bool
+	pooled    atomic.Bool
+	wg        sync.WaitGroup
+	Result    *Result
 
 	ctx   context.Context
 	event *Event
@@ -40,20 +50,46 @@ func NewFuture(
 	event *Event,
 	sub *Subscription,
 ) *Future {
-	return &Future{
-		done:  make(chan struct{}),
-		ctx:   ctx,
-		event: event,
-		sub:   sub,
-	}
+	f := futurePool.Get().(*Future)
+	f.completed.Store(false)
+	f.pooled.Store(false)
+	f.Result = nil
+	f.ctx = ctx
+	f.event = event
+	f.sub = sub
+	f.wg.Add(1)
+	return f
 }
 
 func (f *Future) complete(result *Result) {
+	if !f.completed.CompareAndSwap(false, true) {
+		return
+	}
+	if result == nil {
+		result = NewResultOK(nil)
+	}
 	f.Result = result
-	close(f.done)
+	f.wg.Done()
+}
+
+func (f *Future) Ready() bool {
+	return f.completed.Load()
 }
 
 func (f *Future) Wait() *Result {
-	<-f.done
-	return f.Result
+	f.wg.Wait()
+	res := f.Result
+	f.recycle()
+	return res
+}
+
+func (f *Future) recycle() {
+	if !f.pooled.CompareAndSwap(false, true) {
+		return
+	}
+	f.ctx = nil
+	f.event = nil
+	f.sub = nil
+	f.Result = nil
+	futurePool.Put(f)
 }
